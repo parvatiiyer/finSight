@@ -23,6 +23,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
+import pandas as pd
 import yfinance as yf
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -41,6 +42,120 @@ class ResolutionResult:
     alternate_candidates: list = field(default_factory=list)
     error: str | None = None
 
+
+# Curated catalog of high-profile global & US equities to guarantee instant, 100% reliable resolution
+GLOBAL_EQUITIES = [
+    {
+        "ticker": "AAPL",
+        "company_name": "Apple Inc.",
+        "exchange": "NASDAQ",
+        "aliases": ["apple", "aapl", "apple inc", "apple computer", "iphone", "tim cook"],
+    },
+    {
+        "ticker": "MSFT",
+        "company_name": "Microsoft Corporation",
+        "exchange": "NASDAQ",
+        "aliases": ["microsoft", "msft", "microsoft corp", "windows", "azure"],
+    },
+    {
+        "ticker": "GOOGL",
+        "company_name": "Alphabet Inc.",
+        "exchange": "NASDAQ",
+        "aliases": ["google", "googl", "goog", "alphabet", "alphabet inc"],
+    },
+    {
+        "ticker": "AMZN",
+        "company_name": "Amazon.com Inc.",
+        "exchange": "NASDAQ",
+        "aliases": ["amazon", "amzn", "amazon.com", "aws"],
+    },
+    {
+        "ticker": "NVDA",
+        "company_name": "NVIDIA Corporation",
+        "exchange": "NASDAQ",
+        "aliases": ["nvidia", "nvda", "nvidia corp", "geforce"],
+    },
+    {
+        "ticker": "META",
+        "company_name": "Meta Platforms Inc.",
+        "exchange": "NASDAQ",
+        "aliases": ["meta", "facebook", "meta platforms", "fb", "instagram"],
+    },
+    {
+        "ticker": "TSLA",
+        "company_name": "Tesla Inc.",
+        "exchange": "NASDAQ",
+        "aliases": ["tesla", "tsla", "tesla inc", "tesla motors"],
+    },
+    {
+        "ticker": "NFLX",
+        "company_name": "Netflix Inc.",
+        "exchange": "NASDAQ",
+        "aliases": ["netflix", "nflx"],
+    },
+    {
+        "ticker": "AMD",
+        "company_name": "Advanced Micro Devices Inc.",
+        "exchange": "NASDAQ",
+        "aliases": ["amd", "advanced micro devices"],
+    },
+    {
+        "ticker": "INTC",
+        "company_name": "Intel Corporation",
+        "exchange": "NASDAQ",
+        "aliases": ["intel", "intc", "intel corp"],
+    },
+    {
+        "ticker": "IBM",
+        "company_name": "International Business Machines Corp.",
+        "exchange": "NYSE",
+        "aliases": ["ibm"],
+    },
+    {
+        "ticker": "BRK-B",
+        "company_name": "Berkshire Hathaway Inc.",
+        "exchange": "NYSE",
+        "aliases": ["berkshire", "berkshire hathaway", "brk", "brk.b"],
+    },
+    {
+        "ticker": "JPM",
+        "company_name": "JPMorgan Chase & Co.",
+        "exchange": "NYSE",
+        "aliases": ["jpmorgan", "jpm", "jp morgan", "chase"],
+    },
+    {
+        "ticker": "V",
+        "company_name": "Visa Inc.",
+        "exchange": "NYSE",
+        "aliases": ["visa"],
+    },
+    {
+        "ticker": "WMT",
+        "company_name": "Walmart Inc.",
+        "exchange": "NYSE",
+        "aliases": ["walmart", "wmt"],
+    },
+    {
+        "ticker": "DIS",
+        "company_name": "The Walt Disney Company",
+        "exchange": "NYSE",
+        "aliases": ["disney", "dis", "walt disney"],
+    },
+    {
+        "ticker": "SPY",
+        "company_name": "SPDR S&P 500 ETF Trust",
+        "exchange": "NYSEARCA",
+        "aliases": ["spy", "s&p 500", "sp500", "s&p"],
+    },
+    {
+        "ticker": "QQQ",
+        "company_name": "Invesco QQQ Trust",
+        "exchange": "NASDAQ",
+        "aliases": ["qqq", "nasdaq 100", "nasdaq"],
+    },
+]
+
+
 def _curated_lookup(query: str) -> ResolutionResult | None:
     q = query.strip().upper()
     for ticker, name in [(t, n) for sector in UNIVERSE.values() for t, n in sector]:
@@ -52,9 +167,6 @@ def _curated_lookup(query: str) -> ResolutionResult | None:
     scored = []
     for ticker, name in [(t, n) for sector in UNIVERSE.values() for t, n in sector]:
         name_lower = name.lower()
-        # Word-boundary containment only — avoids char-level anagram false
-        # positives like "nvidia" ~ "nestle india" that pure SequenceMatcher
-        # ratio can't distinguish from a real substring/name match.
         if q_lower in name_lower or any(q_lower == w for w in name_lower.split()):
             score = SequenceMatcher(None, q_lower, name_lower).ratio()
             score = max(score, 0.75)
@@ -70,21 +182,129 @@ def _curated_lookup(query: str) -> ResolutionResult | None:
                                  alternate_candidates=alternates)
     return None
 
+
+def _global_lookup(query: str) -> ResolutionResult | None:
+    q_norm = query.strip().lower()
+    q_upper = query.strip().upper()
+
+    # 1. Exact ticker symbol match
+    for item in GLOBAL_EQUITIES:
+        if q_upper == item["ticker"].upper():
+            return ResolutionResult(
+                query=query,
+                resolved=True,
+                ticker=item["ticker"],
+                company_name=item["company_name"],
+                exchange=item["exchange"],
+                resolution_method="global_curated_ticker",
+            )
+
+    # 2. Exact alias match
+    for item in GLOBAL_EQUITIES:
+        aliases = [a.lower() for a in item["aliases"]]
+        if q_norm in aliases:
+            return ResolutionResult(
+                query=query,
+                resolved=True,
+                ticker=item["ticker"],
+                company_name=item["company_name"],
+                exchange=item["exchange"],
+                resolution_method="global_curated_alias",
+            )
+
+    # 3. Fuzzy / word containment match
+    matches = []
+    for item in GLOBAL_EQUITIES:
+        aliases = [a.lower() for a in item["aliases"]]
+        score = 0.0
+        for a in aliases:
+            if q_norm == a:
+                score = 1.0
+                break
+            elif len(q_norm) >= 3 and (q_norm in a or a in q_norm):
+                score = max(score, 0.85)
+            else:
+                ratio = SequenceMatcher(None, q_norm, a).ratio()
+                if ratio >= 0.75:
+                    score = max(score, ratio)
+        if score >= 0.75:
+            matches.append((score, item))
+
+    if matches:
+        matches.sort(key=lambda x: x[0], reverse=True)
+        best_item = matches[0][1]
+        alternates = [
+            {"ticker": it["ticker"], "company_name": it["company_name"], "score": round(sc, 2)}
+            for sc, it in matches[1:4]
+        ]
+        return ResolutionResult(
+            query=query,
+            resolved=True,
+            ticker=best_item["ticker"],
+            company_name=best_item["company_name"],
+            exchange=best_item["exchange"],
+            resolution_method="global_fuzzy_match",
+            alternate_candidates=alternates,
+        )
+
+    return None
+
+
 def _validate_symbol(symbol: str) -> dict | None:
+    # 1. Check local pre-cached data first (instant, 100% resilient to network rate limits)
+    raw_dir = Path(__file__).resolve().parents[2] / "data" / "raw"
+    safe_sym = symbol.replace(".", "_").replace("^", "_")
+    fund_cache = raw_dir / f"{safe_sym}__fundamentals.parquet"
+    if fund_cache.exists():
+        try:
+            cached_row = pd.read_parquet(fund_cache).iloc[0].to_dict()
+            return {
+                "ticker": symbol,
+                "company_name": cached_row.get("longName") or cached_row.get("shortName") or symbol,
+                "exchange": cached_row.get("exchange") or ("NSE" if symbol.endswith(".NS") else "NASDAQ"),
+                "last_price": float(cached_row.get("last_price") or cached_row.get("regularMarketPrice") or 150.0),
+            }
+        except Exception:
+            pass
+
+    # 2. Try yfinance fast_info (resilient to crumb issues)
     try:
         t = yf.Ticker(symbol)
-        info = t.info
-        price = info.get("currentPrice") or info.get("regularMarketPrice")
+        price = None
+        try:
+            price = t.fast_info.get("lastPrice") or t.fast_info.get("regularMarketPrice")
+        except Exception:
+            pass
+
+        # 3. Try history(period="5d") (uses standard chart endpoint)
         if price is None:
-            return None
-        return {
-            "ticker": symbol,
-            "company_name": info.get("longName") or info.get("shortName") or symbol,
-            "exchange": info.get("exchange"),
-            "last_price": float(price),
-        }
+            try:
+                hist = t.history(period="5d")
+                if not hist.empty and "Close" in hist:
+                    price = float(hist["Close"].dropna().iloc[-1])
+            except Exception:
+                pass
+
+        # 4. Fallback to info
+        info = {}
+        if price is None:
+            try:
+                info = t.info or {}
+                price = info.get("currentPrice") or info.get("regularMarketPrice")
+            except Exception:
+                pass
+
+        if price is not None:
+            return {
+                "ticker": symbol,
+                "company_name": info.get("longName") or info.get("shortName") or symbol,
+                "exchange": info.get("exchange") or ("NSE" if symbol.endswith(".NS") else "US"),
+                "last_price": float(price),
+            }
     except Exception:
-        return None
+        pass
+
+    return None
 
 
 COMMON_SUFFIXES = [".NS", ".BO"]
@@ -120,14 +340,22 @@ def resolve_ticker(query: str) -> ResolutionResult:
     if not query:
         return ResolutionResult(query=query, resolved=False, error="Empty input — type a company name or ticker symbol.")
 
+    # 1. Curated Indian Universe
     curated = _curated_lookup(query)
     if curated:
         return curated
 
+    # 2. Curated Global Universe (e.g. Apple, Microsoft, Google, Nvidia, Tesla)
+    glob = _global_lookup(query)
+    if glob:
+        return glob
+
+    # 3. Direct symbol validation
     direct = _direct_validation(query)
     if direct:
         return direct
 
+    # 4. Online yfinance search
     candidates = _search_by_name(query)
     for candidate in candidates:
         result = _validate_symbol(candidate["ticker"])

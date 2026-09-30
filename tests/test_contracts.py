@@ -20,12 +20,27 @@ def test_health_contract():
 
 
 def test_resolve_contract():
+    # Indian stock in curated universe
     res = client.get("/resolve?query=HDFC Bank")
     assert res.status_code == 200
     data = ResolveResponse(**res.json())
     assert data.ticker == "HDFCBANK.NS"
     assert "HDFC" in data.company_name
     assert data.resolution_method
+
+    # Apple resolution (query='apple', 'aapl', 'Apple Inc.')
+    for q in ["apple", "aapl", "Apple", "Apple Inc."]:
+        res_apple = client.get(f"/resolve?query={q}")
+        assert res_apple.status_code == 200
+        data_apple = ResolveResponse(**res_apple.json())
+        assert data_apple.ticker == "AAPL"
+        assert "Apple" in data_apple.company_name
+        assert data_apple.exchange == "NASDAQ"
+
+    # Other global mega-caps
+    res_nvda = client.get("/resolve?query=nvidia")
+    assert res_nvda.status_code == 200
+    assert ResolveResponse(**res_nvda.json()).ticker == "NVDA"
 
 
 def test_explain_demo_contract():

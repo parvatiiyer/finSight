@@ -19,6 +19,8 @@ MIN_TRADING_DAYS = 30  # anything less almost certainly means a bad/partial fetc
 
 def fetch_ohlcv(ticker, period="3y", interval="1d", max_retries=3, use_cache=True, cache_max_age_hours=12):
     cache_file = _cache_path(ticker, f"ohlcv_{period}_{interval}")
+    safe_ticker = ticker.replace(".", "_").replace("^", "_")
+
     if use_cache and cache_file.exists():
         age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
         if age_hours < cache_max_age_hours:
@@ -37,11 +39,6 @@ def fetch_ohlcv(ticker, period="3y", interval="1d", max_retries=3, use_cache=Tru
             df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
             df.index.name = "date"
             if len(df) < MIN_TRADING_DAYS:
-                # Non-empty but too thin to be a legitimate multi-year fetch for
-                # `period` — almost always a transient/partial response, not a
-                # real "this stock only has 5 days of history" situation. Don't
-                # cache it, so the next call retries instead of being stuck
-                # replaying the same bad data for up to cache_max_age_hours.
                 raise ValueError(
                     f"yfinance returned only {len(df)} rows for {ticker} over period={period!r} "
                     f"(expected roughly {MIN_TRADING_DAYS}+) — treating as a partial/failed fetch"
@@ -53,22 +50,49 @@ def fetch_ohlcv(ticker, period="3y", interval="1d", max_retries=3, use_cache=Tru
             wait = 2 ** attempt
             logger.warning(f"{ticker}: attempt {attempt}/{max_retries} failed ({e}); retrying in {wait}s")
             time.sleep(wait)
+
+    # If live fetch failed (e.g. rate-limited on cloud hosting), check if ANY valid cached parquet exists for this ticker
+    fallback_caches = sorted(RAW_DIR.glob(f"{safe_ticker}__ohlcv_*.parquet"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if fallback_caches:
+        logger.warning(f"{ticker}: live fetch failed ({last_err}); falling back to cached file {fallback_caches[0].name}")
+        cached = pd.read_parquet(fallback_caches[0])
+        if len(cached) >= MIN_TRADING_DAYS:
+            return cached
+
     raise RuntimeError(f"Failed to fetch OHLCV for {ticker} after {max_retries} attempts: {last_err}")
 
 def fetch_fundamentals(ticker, use_cache=True, cache_max_age_hours=24):
     cache_file = _cache_path(ticker, "fundamentals")
+    safe_ticker = ticker.replace(".", "_").replace("^", "_")
+
     if use_cache and cache_file.exists():
         age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
         if age_hours < cache_max_age_hours:
             return pd.read_parquet(cache_file).iloc[0].to_dict()
-    info = yf.Ticker(ticker).info
+
+    info = {}
+    try:
+        t = yf.Ticker(ticker)
+        info = t.info or {}
+    except Exception as e:
+        logger.warning(f"{ticker}: yfinance info fetch failed ({e})")
+
     fields = ["trailingPE", "priceToBook", "returnOnEquity", "debtToEquity", "currentRatio", "quickRatio",
               "profitMargins", "operatingMargins", "revenueGrowth", "earningsGrowth", "beta", "marketCap",
               "dividendYield", "freeCashflow", "totalDebt", "totalCash", "sector", "longName", "shortName"]
+
+    if not info and cache_file.exists():
+        logger.warning(f"{ticker}: using cached fundamentals as fallback")
+        return pd.read_parquet(cache_file).iloc[0].to_dict()
+
     row = {f: info.get(f) for f in fields}
     row["ticker"] = ticker
     row["fetched_at"] = datetime.utcnow().isoformat()
-    pd.DataFrame([row]).to_parquet(cache_file)
+    if info:
+        try:
+            pd.DataFrame([row]).to_parquet(cache_file)
+        except Exception:
+            pass
     return row
 
 def fetch_company_sector(ticker: str) -> str | None:

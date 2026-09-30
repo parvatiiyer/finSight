@@ -519,37 +519,53 @@
   }
 
   .source-path-row {
-    margin-top: 8px;
+    margin-top: 10px;
     font-size: 11px;
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 3px 8px;
-    background: rgba(45, 35, 64, 0.5);
-    border: 1px dashed var(--hairline);
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 6px 12px;
+    background: rgba(18, 14, 28, 0.95);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--slate);
     max-width: 100%;
-    word-break: break-all;
+    box-sizing: border-box;
+    box-shadow: 2px 2px 0 #090710;
   }
 
   .source-path-label {
-    color: var(--ink-faint);
-    font-size: 9.5px;
+    color: var(--slate);
+    font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    flex-shrink: 0;
+    text-transform: uppercase;
   }
 
   .source-path-link {
-    color: var(--denim);
+    color: var(--sage);
     text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    font-size: 11px;
+    line-height: 1.4;
+    transition: color 0.15s ease, text-decoration 0.15s ease;
   }
 
   .source-path-link:hover {
+    color: var(--ochre);
     text-decoration: underline;
-    color: var(--sage);
   }
 
-  .source-path-val {
-    color: var(--ink-dim);
+  .source-path-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+    opacity: 0.85;
   }
 
   .empty-note {
@@ -1128,10 +1144,10 @@ function render(report) {
   const banner = report.unexplained
     ? `<div class="banner">No evidence considered clears the bar for this move — flagged for manual analyst review rather than assigned a guessed cause.</div>` : '';
   const acceptedHtml = report.accepted_evidence.length
-    ? report.accepted_evidence.map(e => renderEvidenceRow(e, true)).join('')
+    ? report.accepted_evidence.map(e => renderEvidenceRow(e, true, report.ticker)).join('')
     : `<div class="empty-note">No evidence accepted.</div>`;
   const rejectedHtml = report.rejected_evidence.length
-    ? report.rejected_evidence.map(e => renderEvidenceRow(e, false)).join('')
+    ? report.rejected_evidence.map(e => renderEvidenceRow(e, false, report.ticker)).join('')
     : `<div class="empty-note">Nothing considered was rejected.</div>`;
 
   document.getElementById('report').innerHTML = `
@@ -1238,21 +1254,52 @@ async function runExplain(query, btn) {
   }
 }
 
-function renderEvidenceRow(e, accepted) {
-  const reasonHtml = (!accepted && e.rejection_reason) ? `<div class="reason">${e.rejection_reason}</div>` : '';
-  const pathVal = e.source_path || e.source_url || (e.source_agent ? `${e.source_agent}://provenance` : '');
-  const linkTarget = e.source_url || (pathVal.startsWith('http') ? pathVal : null);
-
-  let sourcePathHtml = '';
-  if (pathVal) {
-    sourcePathHtml = `<div class="source-path-row">
-      <span class="source-path-label mono">SOURCE PATH:</span>
-      ${linkTarget 
-        ? `<a href="${linkTarget}" target="_blank" rel="noopener" class="source-path-link mono">${pathVal} ↗</a>` 
-        : `<span class="source-path-val mono">${pathVal}</span>`
-      }
-    </div>`;
+function resolveEvidenceLink(e, pathVal, ticker) {
+  if (e.source_url && e.source_url.startsWith('http')) {
+    return e.source_url;
   }
+  if (pathVal && pathVal.startsWith('http')) {
+    return pathVal;
+  }
+  const cleanTicker = (ticker || '').replace('.NS', '').replace('.BO', '');
+  const isIndian = (ticker || '').endsWith('.NS') || (ticker || '').endsWith('.BO');
+  const agent = e.source_agent || '';
+
+  if (agent === 'news') {
+    const q = (e.raw_text || '').replace(/[^\w\s]/gi, ' ').slice(0, 60);
+    return `https://news.google.com/search?q=${encodeURIComponent(q + ' ' + cleanTicker)}`;
+  }
+  if (agent === 'filing') {
+    if (isIndian) {
+      return `https://www.screener.in/company/${encodeURIComponent(cleanTicker)}/`;
+    }
+    return `https://www.google.com/finance/quote/${encodeURIComponent(cleanTicker)}:NASDAQ`;
+  }
+  if (agent === 'technical' || pathVal.startsWith('market_data') || pathVal.startsWith('indicators') || pathVal.startsWith('models')) {
+    return `https://finance.yahoo.com/quote/${encodeURIComponent(ticker || cleanTicker)}`;
+  }
+  if (agent === 'fundamentals' || pathVal.startsWith('financial_statements') || pathVal.startsWith('sec_edgar')) {
+    if (isIndian) {
+      return `https://www.screener.in/company/${encodeURIComponent(cleanTicker)}/consolidated/`;
+    }
+    return `https://finance.yahoo.com/quote/${encodeURIComponent(ticker || cleanTicker)}/financials`;
+  }
+  return `https://finance.yahoo.com/quote/${encodeURIComponent(ticker || cleanTicker)}`;
+}
+
+function renderEvidenceRow(e, accepted, ticker) {
+  const reasonHtml = (!accepted && e.rejection_reason) ? `<div class="reason">${e.rejection_reason}</div>` : '';
+  const pathVal = e.source_path || e.source_url || (e.source_agent ? `${e.source_agent}://data_provenance` : 'audit://provenance');
+  const linkTarget = resolveEvidenceLink(e, pathVal, ticker);
+
+  let sourcePathHtml = `
+    <div class="source-path-row">
+      <span class="source-path-label mono">SOURCE PATH:</span>
+      <a href="${linkTarget}" target="_blank" rel="noopener noreferrer" class="source-path-link mono" title="Inspect source evidence & market data">
+        <span>${pathVal}</span>
+        <span class="source-path-icon">↗</span>
+      </a>
+    </div>`;
 
   return `<div class="evidence-row ${accepted ? 'accepted' : 'rejected'}">
     <div class="meta"><span class="src mono">${e.source_agent}</span><span class="mono">${e.event_date}</span></div>
