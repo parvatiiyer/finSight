@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  finsight:
+    build: .
+    container_name: finsight-app
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
