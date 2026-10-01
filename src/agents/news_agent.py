@@ -81,19 +81,23 @@ _FINBERT_FAILED = False
 
 def score_headline_sentiment_production(headline: str) -> tuple[Direction, float]:
     """
-    Scores sentiment using ProsusAI/finbert via transformers if available/cached,
-    falling back seamlessly to _keyword_polarity if offline or uninstalled.
+    Scores sentiment using ProsusAI/finbert via transformers if available/cached locally,
+    falling back seamlessly to _keyword_polarity in <1ms without hanging on network retries.
     """
     global _FINBERT_PIPELINE, _FINBERT_FAILED
     if not _FINBERT_FAILED:
         if _FINBERT_PIPELINE is None:
             try:
+                import os
+                # Prevent HuggingFace hub from retrying network requests on every headline
+                os.environ["HF_HUB_OFFLINE"] = "1"
                 from transformers import pipeline
                 _FINBERT_PIPELINE = pipeline(
                     "sentiment-analysis",
                     model="ProsusAI/finbert",
                     tokenizer="ProsusAI/finbert",
                     top_k=None,
+                    local_files_only=True,
                 )
             except Exception:
                 _FINBERT_FAILED = True

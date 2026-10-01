@@ -26,6 +26,23 @@ class FilingChunk:
             self.text = self.content
 
 
+class FastFilingEmbeddingFunction:
+    """Zero-network, high-speed embedding function to prevent heavy 80MB ONNX model downloads from AWS S3."""
+    def __call__(self, input: list[str]) -> list[list[float]]:
+        import hashlib
+        embeddings = []
+        dim = 64
+        for text in input:
+            vec = [0.0] * dim
+            tokens = text.lower().split()
+            for token in tokens:
+                idx = int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16) % dim
+                vec[idx] += 1.0
+            norm = (sum(x * x for x in vec) ** 0.5) or 1.0
+            embeddings.append([x / norm for x in vec])
+        return embeddings
+
+
 class FilingRetriever:
     """
     Retriever for annual report filings with ChromaDB backend and TF-IDF fallback.
@@ -51,8 +68,12 @@ class FilingRetriever:
                 client = chromadb.Client()
             else:
                 client = chromadb.PersistentClient(path=self.persist_dir)
-            self.chroma_collection = client.get_or_create_collection(name=self.collection_name)
-        except Exception as e:
+            # Use FastFilingEmbeddingFunction to avoid downloading 79.3MB ONNX model over network
+            self.chroma_collection = client.get_or_create_collection(
+                name=self.collection_name,
+                embedding_function=FastFilingEmbeddingFunction(),
+            )
+        except Exception:
             # Fall back to in-memory TF-IDF index
             self.chroma_collection = None
 

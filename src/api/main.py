@@ -201,6 +201,13 @@ def explain(
     window_start = pd.Timestamp(start) if start else None
     window_end = pd.Timestamp(end) if end else None
 
+    MIN_SUPPORTED_DATE = pd.Timestamp("2015-01-01")
+    if window_start and window_start < MIN_SUPPORTED_DATE:
+        raise HTTPException(
+            status_code=400,
+            detail="FinSight factor attribution supports analysis windows from 2015-01-01 onwards. Prior to 2015, multi-factor market and sector indices lack sufficient overlapping calendar coverage for beta estimation.",
+        )
+
     try:
         report = explain_move_live(resolution.ticker, window_start=window_start, window_end=window_end)
     except Exception as e:

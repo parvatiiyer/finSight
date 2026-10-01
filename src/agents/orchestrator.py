@@ -126,6 +126,19 @@ def explain_move_live(
     """
     from src.data import ingest
 
+    MIN_SUPPORTED_DATE = pd.Timestamp("2015-01-01")
+    if window_start is not None:
+        ws_norm = window_start.tz_localize(None) if getattr(window_start, "tz", None) else window_start
+        if ws_norm < MIN_SUPPORTED_DATE:
+            raise ValueError(
+                f"Requested start date {ws_norm.date()} is prior to 2015-01-01. "
+                "FinSight supports historical moves from 2015 onwards to ensure reliable multi-factor market and sector alignment."
+            )
+        # If looking at earlier years (e.g. 2016-2023), pull period="max" so historical dates are available
+        now_dt = pd.Timestamp.now()
+        if (now_dt - ws_norm).days > 700:
+            period = "max"
+
     ohlcv = ingest.fetch_ohlcv(ticker, period=period)
     market_ohlcv = ingest.fetch_ohlcv(MARKET_INDEX, period=period)
     market_returns = _to_log_returns(market_ohlcv)

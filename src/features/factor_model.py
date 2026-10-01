@@ -108,10 +108,22 @@ def estimate_betas(
     as_of_norm = _normalize_timestamp(as_of)
 
     trailing = aligned.loc[aligned.index < as_of_norm].tail(lookback)
+    if len(trailing) < 30 and "sector" in aligned.columns:
+        # Fall back to single-factor market alignment if sector history has gaps
+        try:
+            mkt_aligned = _align_returns(stock_returns, market_returns, None)
+            mkt_trailing = mkt_aligned.loc[mkt_aligned.index < as_of_norm].tail(lookback)
+            if len(mkt_trailing) >= 30:
+                aligned = mkt_aligned
+                trailing = mkt_trailing
+        except Exception:
+            pass
+
     if len(trailing) < 30:
         raise ValueError(
             f"Not enough ALIGNED trailing history before {as_of_norm.date()} to estimate betas "
-            f"(need >= 30 overlapping trading days across stock/market/sector, found {len(trailing)})"
+            f"(need >= 30 overlapping trading days, found {len(trailing)}). "
+            f"Please choose an analysis window from 2015-01-01 onwards where continuous trading data is available."
         )
 
     y = trailing["stock"].values

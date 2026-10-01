@@ -335,24 +335,34 @@ def _search_by_name(query: str) -> list[dict]:
         return []
 
 
+_RESOLUTION_CACHE: dict[str, ResolutionResult] = {}
+
+
 def resolve_ticker(query: str) -> ResolutionResult:
     query = (query or "").strip()
     if not query:
         return ResolutionResult(query=query, resolved=False, error="Empty input — type a company name or ticker symbol.")
 
+    cache_key = query.lower()
+    if cache_key in _RESOLUTION_CACHE:
+        return _RESOLUTION_CACHE[cache_key]
+
     # 1. Curated Indian Universe
     curated = _curated_lookup(query)
     if curated:
+        _RESOLUTION_CACHE[cache_key] = curated
         return curated
 
     # 2. Curated Global Universe (e.g. Apple, Microsoft, Google, Nvidia, Tesla)
     glob = _global_lookup(query)
     if glob:
+        _RESOLUTION_CACHE[cache_key] = glob
         return glob
 
     # 3. Direct symbol validation
     direct = _direct_validation(query)
     if direct:
+        _RESOLUTION_CACHE[cache_key] = direct
         return direct
 
     # 4. Online yfinance search
@@ -360,11 +370,13 @@ def resolve_ticker(query: str) -> ResolutionResult:
     for candidate in candidates:
         result = _validate_symbol(candidate["ticker"])
         if result:
-            return ResolutionResult(
+            res = ResolutionResult(
                 query=query, resolved=True, resolution_method="name_search", **result,
                 alternate_candidates=[{"ticker": c["ticker"], "company_name": c["company_name"], "score": None}
                                        for c in candidates if c["ticker"] != result["ticker"]][:4],
             )
+            _RESOLUTION_CACHE[cache_key] = res
+            return res
 
     return ResolutionResult(
         query=query, resolved=False,
