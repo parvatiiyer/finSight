@@ -64,7 +64,7 @@ class ResolveResponse(BaseModel):
     company_name: str
     exchange: str
     resolution_method: str
-    alternate_candidates: list[str] = Field(default_factory=list)
+    alternate_candidates: list[dict[str, Any] | str] = Field(default_factory=list)
 
 
 class HealthResponse(BaseModel):

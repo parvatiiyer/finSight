@@ -6,11 +6,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src.agents.evidence_types import Evidence, Direction
 
 def check_earnings_proximity(ticker, window_start, window_end, earnings_dates, proximity_days=3):
+    w_start = pd.Timestamp(window_start).tz_localize(None) if getattr(pd.Timestamp(window_start), "tz", None) else pd.Timestamp(window_start)
+    w_end = pd.Timestamp(window_end).tz_localize(None) if getattr(pd.Timestamp(window_end), "tz", None) else pd.Timestamp(window_end)
     for edate in earnings_dates:
-        edate = pd.Timestamp(edate)
-        if (window_start - pd.Timedelta(days=proximity_days)) <= edate <= window_end:
-            return Evidence("fundamentals", edate.date(), Direction.NEUTRAL, 0.7,
-                             f"Quarterly results date ({edate.date()}) falls within the move window",
+        ed_ts = pd.Timestamp(edate).tz_localize(None) if getattr(pd.Timestamp(edate), "tz", None) else pd.Timestamp(edate)
+        if (w_start - pd.Timedelta(days=proximity_days)) <= ed_ts <= w_end:
+            return Evidence("fundamentals", ed_ts.date(), Direction.NEUTRAL, 0.7,
+                             f"Quarterly results date ({ed_ts.date()}) falls within the move window",
                              1.0, ["earnings_date"],
                              source_url=f"https://finance.yahoo.com/calendar/earnings?symbol={ticker}",
                              source_path=f"sec_edgar/earnings_calendar/{ticker}")

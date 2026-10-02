@@ -120,10 +120,20 @@ def estimate_betas(
             pass
 
     if len(trailing) < 30:
+        stock_clean = stock_returns.dropna()
+        if not stock_clean.empty:
+            earliest_dt = stock_clean.index.min()
+            earliest_norm = _normalize_timestamp(earliest_dt)
+            if as_of_norm < earliest_norm:
+                raise ValueError(
+                    f"Requested start date {as_of_norm.date()} is prior to {earliest_norm.date()} "
+                    f"(the earliest available trading date / listing date for {getattr(stock_returns, 'name', 'this stock')}). "
+                    f"Please choose an analysis window after its listing date."
+                )
         raise ValueError(
             f"Not enough ALIGNED trailing history before {as_of_norm.date()} to estimate betas "
             f"(need >= 30 overlapping trading days, found {len(trailing)}). "
-            f"Please choose an analysis window from 2015-01-01 onwards where continuous trading data is available."
+            f"Please choose an analysis window where continuous trading data is available."
         )
 
     y = trailing["stock"].values

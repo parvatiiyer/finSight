@@ -21,8 +21,11 @@ even though it's one HTTP call, so a failed resolution returns a fast, clear
 data fetch.
 """
 
+import os
 import sys
 from pathlib import Path
+
+os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl")
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -175,10 +178,16 @@ def resolve(query: str = Query(..., description="Company name or ticker, e.g. 'H
     result = resolve_ticker(query)
     if not result.resolved:
         raise HTTPException(status_code=404, detail=result.error)
+    candidates = []
+    for c in result.alternate_candidates:
+        if isinstance(c, dict):
+            candidates.append(c)
+        else:
+            candidates.append({"ticker": str(c), "company_name": str(c), "score": None})
     return {
         "query": result.query, "ticker": result.ticker, "company_name": result.company_name,
         "exchange": result.exchange, "resolution_method": result.resolution_method,
-        "alternate_candidates": result.alternate_candidates,
+        "alternate_candidates": candidates,
     }
 
 
@@ -210,9 +219,14 @@ def explain(
 
     try:
         report = explain_move_live(resolution.ticker, window_start=window_start, window_end=window_end)
+    except ValueError as e:
+        # Client date selection error (e.g. date precedes stock listing date, or invalid window)
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
+        )
     except Exception as e:
-        # Live data unreachable, ticker too new/thin for the beta lookback, etc.
-        # Surface a clear, actionable error instead of a raw 500 traceback.
+        # Upstream network failure, live data unreachable, etc.
         raise HTTPException(
             status_code=502,
             detail=f"Resolved '{query}' to {resolution.ticker}, but the live analysis failed: {e}",

@@ -139,37 +139,29 @@ def explain_move_live(
         if (now_dt - ws_norm).days > 700:
             period = "max"
 
-    ohlcv = ingest.fetch_ohlcv(ticker, period=period)
-    market_ohlcv = ingest.fetch_ohlcv(MARKET_INDEX, period=period)
+    ohlcv = ingest.fetch_ohlcv(ticker, period=period, start=window_start, end=window_end)
+    market_ohlcv = ingest.fetch_ohlcv(MARKET_INDEX, period=period, start=window_start, end=window_end)
     market_returns = _to_log_returns(market_ohlcv)
     stock_returns = _to_log_returns(ohlcv)
+    stock_returns.name = ticker
 
-    # Fail fast and specifically here, at the source of each series, rather
-    # than letting a bad fetch travel five layers down into a generic
-    # "no overlapping trading dates" error that could mean anything.
+    # Fail fast and specifically here, at the source of each series
     _validate_returns("Stock", ticker, stock_returns)
     _validate_returns("Market", MARKET_INDEX, market_returns)
 
-    # Sector factor: try the curated mapping first (covers our 25 tickers
-    # exactly as before), then fall back to yfinance's reported sector for
-    # anything else. Either way, if no sector index can be determined, the
-    # factor model runs market-only rather than erroring out.
+    fundamentals = ingest.fetch_fundamentals(ticker)
+    company_name = fundamentals.get("longName") or fundamentals.get("shortName") or ticker
+
+    # Sector factor: try curated mapping first, then reuse fundamentals sector
     sector_index = sector_index_of(ticker)
     if sector_index is None:
-        yf_sector = ingest.fetch_company_sector(ticker)
+        yf_sector = fundamentals.get("sector")
         sector_index = sector_index_from_yf_sector(yf_sector)
 
     sector_returns = None
     if sector_index is not None:
         try:
-            sector_ohlcv = ingest.fetch_ohlcv(sector_index, period=period)
-            # Passed through on its OWN native calendar/timezone, deliberately
-            # NOT reindexed onto stock_returns.index here — _align_returns()
-            # in factor_model.py is the one place alignment happens, and it
-            # normalizes tz/calendar consistently for stock, market, and
-            # sector alike. Reindexing here first (as a previous version did)
-            # silently produced an all-NaN sector series whenever the sector
-            # index's timezone differed from the stock's.
+            sector_ohlcv = ingest.fetch_ohlcv(sector_index, period=period, start=window_start, end=window_end)
             sector_returns = _to_log_returns(sector_ohlcv)
             _validate_returns("Sector", sector_index, sector_returns)
         except Exception as e:
@@ -184,9 +176,6 @@ def explain_move_live(
         )
 
     move = decompose_move(ticker, stock_returns, market_returns, sector_returns, window_start, window_end)
-
-    fundamentals = ingest.fetch_fundamentals(ticker)
-    company_name = fundamentals.get("longName") or fundamentals.get("shortName") or ticker
     feature_table = build_feature_table(ohlcv, fundamentals)
 
     quarterly_history = ingest.fetch_quarterly_fundamentals_history(ticker)

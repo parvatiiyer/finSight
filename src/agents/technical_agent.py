@@ -24,10 +24,17 @@ def gather_technical_evidence(
         w_start = window_start_or_feature_table
         w_end = window_end_or_start
 
-    w_start = pd.Timestamp(w_start) if w_start is not None else None
-    w_end = pd.Timestamp(w_end) if w_end is not None else None
+    w_start = pd.Timestamp(w_start).tz_localize(None) if w_start is not None else None
+    w_end = pd.Timestamp(w_end).tz_localize(None) if w_end is not None else None
 
-    window = feature_table.loc[(feature_table.index >= w_start) & (feature_table.index <= w_end)]
+    idx = feature_table.index.tz_localize(None) if getattr(feature_table.index, "tz", None) else feature_table.index
+    mask = pd.Series(True, index=feature_table.index)
+    if w_start is not None:
+        mask &= (idx >= w_start)
+    if w_end is not None:
+        mask &= (idx <= w_end)
+
+    window = feature_table.loc[mask]
     if window.empty:
         return []
     evidence = []

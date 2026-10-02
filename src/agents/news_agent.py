@@ -82,13 +82,18 @@ _FINBERT_FAILED = False
 def score_headline_sentiment_production(headline: str) -> tuple[Direction, float]:
     """
     Scores sentiment using ProsusAI/finbert via transformers if available/cached locally,
-    falling back seamlessly to _keyword_polarity in <1ms without hanging on network retries.
+    falling back seamlessly to _keyword_polarity in <1ms without hanging on network retries
+    or exceeding low-memory limits on cloud providers (e.g. Render 512MB free tier).
     """
+    import os
+    # Guard against 512MB RAM OOM crashes on Render or when low-memory mode is requested
+    if os.environ.get("RENDER") or os.environ.get("DISABLE_FINBERT", "0") == "1":
+        return _keyword_polarity(headline)
+
     global _FINBERT_PIPELINE, _FINBERT_FAILED
     if not _FINBERT_FAILED:
         if _FINBERT_PIPELINE is None:
             try:
-                import os
                 # Prevent HuggingFace hub from retrying network requests on every headline
                 os.environ["HF_HUB_OFFLINE"] = "1"
                 from transformers import pipeline
